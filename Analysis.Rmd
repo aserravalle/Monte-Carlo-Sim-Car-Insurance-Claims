@@ -1,0 +1,107 @@
+---
+title: "Appendix 1: A Detailed R Notebook With Code"
+output:
+  html_notebook: default
+  pdf_document: default
+---
+A simple R script was submitted for Turnitin. This is a clearer notebook which allows for more readability, but cannot be copy/pasted by the marker to check the code
+# Read the dataset
+```{r}
+#setwd("C:/Users/Ariel/Google Drive/UNI/ACTL2102/Assignment")
+claims = read.csv('claimsdata.csv')
+attach(claims)
+head(claims)
+```
+
+#Create the transition matrix
+
+The table function creates a contingency table of the counts of each variable. In other words, the number of people that transition from state i to j (Nij). Dividing these numbers by the number of people in state i (Ni*) gives the estimates for transition probability.
+
+```{r}
+P = table(claims$ncdlevel18, claims$ncdlevel19)
+Ni = rowSums(P)
+P = (P/Ni)
+P
+```
+
+# Conduct a simulation to estimate 2020 premium income using 2019 state
+
+The simplest way to do this would be to define a function. The arguments of the function are the transition probability matrix, the initial state of the insured life, and the number of simulations to run. The function is defined as follows:
+
+  1. Create an empty vector 'sim.j' with the same length as the number of simulations to run. This will house our result from each simulation.
+  2. The 2019 Discount Level determines initial state i and thus the row of the Transition Probability Matrix to use. This is given by the argument 'init', and we add three to this number for appropriate indexing
+  3. Create a loop which will use a randomly generated multinomial (with probability distribution equal to the i'th row of the transition matrix) to determine the state j (in 2020). Add this to the vector 'sim.j'
+  4. Use the function that outputs premium from discount level to determine the 2020 premium income
+  5. Output the mean of all simulated premiums for that row
+
+```{r}
+Run_MC_Sim <- function(PT.matrix = P, init = 0, num.sims = 1000){
+  sim.j = numeric(num.sims)
+  # init + 3 --> To match to index
+  p = PT.matrix[init+3, ]
+  for (n in 1:num.sims){
+    sim.j[n] = which(rmultinom(1,1,p) == 1) - 3
+  }
+  Premium = 300*(1-(sim.j*0.1))
+  return(mean(Premium))
+}
+```
+
+Finally, we run our function on the NCDlevel19 variable to produce the simulated expected premium income. The sum of these is our expected total premium income.
+
+```{r}
+claims$Simulated.Premium = rep(0,length(claims$X))
+
+for (i in 1:length(claims$X) ){
+  claims$Simulated.Premium[i]  = Run_MC_Sim(PT.matrix = P, init = claims$ncdlevel19[i], num.sims = 1000)
+}
+
+sum(claims$Simulated.Premium)
+```
+
+# 2018 Profitability
+```{r}
+claims$Premium2018 = 300*(1-(claims$ncdlevel18*0.1))
+claims$ClaimsCost2018 = 2000*pmin(claims$numberofclaims , 2)
+LossRatio = sum(claims$ClaimsCost2018)/sum(claims$Premium2018)
+LossRatio
+```
+
+
+# Poisson Model
+```{r}
+Lambda = mean(numberofclaims)
+Lambda
+```
+
+```{r}
+Run_Poisson_Sim <- function(Lambda, init = 0, num.sims = 1000){
+  sim.j = numeric(num.sims)
+  for (n in 1:num.sims){
+    # Number of accidents is poisson RV, with roof at 2
+    accidents = max(rpois(1,Lambda),2)
+    # If no accidents, move up a level
+    if (accidents == 0){state.j = init + 1
+    # if 1, 2, drop 1,2 levels. level floor at -2
+    } else {state.j = max(init - accidents, -2)}
+    sim.j[n] = state.j
+  }
+  Premium = 300*(1-(sim.j*0.1))
+  return(mean(Premium))
+}
+```
+
+```{r}
+claims$Simulated.Premium.Poisson = rep(0,length(claims$X))
+
+for (i in 1:length(claims$X) ){
+  claims$Simulated.Premium.Poisson[i]  = Run_Poisson_Sim(Lambda = Lambda, init = claims$ncdlevel19[i], num.sims = 1000)
+}
+
+head(claims)
+```
+
+```{r}
+sum(claims$Simulated.Premium.Poisson) - sum(claims$Simulated.Premium) 
+```
+
